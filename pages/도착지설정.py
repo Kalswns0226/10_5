@@ -17,7 +17,7 @@ if "voice_query" not in st.session_state:
     st.session_state.voice_id = 0
 
 HERO_HTML = '''
-<div style="font-family:Arial,sans-serif;max-width:700px;margin:auto;background:#102a43;color:white;padding:22px;border-radius:18px">
+<div style="font-family:Arial,sans-serif;max-width:700px;margin:auto;background:#102a43;color:white;padding:22px;border-radius:18px;border:1px solid rgba(148,163,184,0.35)">
   <h1 style="color:white;margin:0 0 8px 0">소리길 🔔</h1>
   <p style="margin:0">음성으로 목적지를 찾고, 거리를 확인하고, 도착 알림을 받아요.</p>
 </div>
@@ -43,18 +43,27 @@ if spoken and spoken.strip():
 APP_HTML = r'''
 <div id="soundroad">
 <style>
-#soundroad {font-family:Arial,sans-serif;color:#102a43;max-width:700px;margin:auto}
+/* 글자색은 Streamlit 테마(라이트/다크)를 그대로 따라가고,
+   배경과 테두리는 반투명 색을 써서 두 모드 모두에서 잘 보이게 함 */
+#soundroad {font-family:Arial,sans-serif;color:inherit;max-width:700px;margin:auto}
 #soundroad * {box-sizing:border-box}
-#soundroad .card {border:2px solid #cbd5e1;border-radius:16px;padding:18px;margin:14px 0}
-#soundroad button {width:100%;min-height:58px;padding:13px;margin:7px 0;border:2px solid #64748b;border-radius:12px;font-size:18px;font-weight:bold;cursor:pointer;background:#f1f5f9;color:#102a43}
-#soundroad button:focus,#soundroad input:focus {outline:4px solid #f59e0b}
-#soundroad .primary {background:#075985;color:white;border-color:#075985}
-#soundroad .stop {background:#9f1239;color:white;border-color:#9f1239}
-#soundroad input {width:100%;min-height:54px;font-size:18px;padding:12px;border:2px solid #64748b;border-radius:10px}
-#soundroad .status {padding:13px;margin:10px 0;background:#f1f5f9;border-left:5px solid #075985;border-radius:8px;line-height:1.6;overflow-wrap:anywhere}
+#soundroad h2, #soundroad p, #soundroad label, #soundroad div {color:inherit}
+#soundroad .card {border:2px solid rgba(148,163,184,0.55);border-radius:16px;padding:18px;margin:14px 0;background:rgba(148,163,184,0.06)}
+#soundroad button {width:100%;min-height:58px;padding:13px;margin:7px 0;border:2px solid rgba(148,163,184,0.8);border-radius:12px;font-size:18px;font-weight:bold;cursor:pointer;background:rgba(148,163,184,0.15);color:inherit}
+#soundroad button:hover {background:rgba(148,163,184,0.28)}
+#soundroad button:disabled {opacity:0.55;cursor:default}
+#soundroad button:focus,#soundroad input:focus {outline:4px solid #f59e0b;outline-offset:2px}
+#soundroad .primary {background:#0369a1;color:#ffffff;border-color:#0369a1}
+#soundroad .primary:hover {background:#075985}
+#soundroad .stop {background:#be123c;color:#ffffff;border-color:#be123c}
+#soundroad .stop:hover {background:#9f1239}
+#soundroad input {width:100%;min-height:54px;font-size:18px;padding:12px;border:2px solid rgba(148,163,184,0.8);border-radius:10px;background:transparent;color:inherit}
+#soundroad input::placeholder {color:inherit;opacity:0.5}
+#soundroad .status {padding:13px;margin:10px 0;background:rgba(14,165,233,0.12);border-left:5px solid #0ea5e9;border-radius:8px;line-height:1.6;overflow-wrap:anywhere}
 #soundroad .metric {font-size:27px;font-weight:bold;overflow-wrap:anywhere}
-#soundroad .muted {font-size:14px;line-height:1.6;color:#334155}
-#soundroad .result {text-align:left;background:white}
+#soundroad .muted {font-size:14px;line-height:1.6;opacity:0.75}
+#soundroad .result {text-align:left;background:transparent}
+#soundroad hr {border:none;border-top:1px solid rgba(148,163,184,0.45)}
 </style>
 
 <section class="card">
