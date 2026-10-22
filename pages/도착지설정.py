@@ -198,10 +198,12 @@ APP_HTML = r'''
     el("search").disabled = true;
 
     try {
+      // photon은 lang=ko를 지원하지 않아 오류(400)가 나므로 lang을 빼고,
+      // 대신 검색 범위를 대한민국 영역(bbox)으로 제한
       const params = new URLSearchParams({
-        q: query + ", 대한민국",
+        q: query,
         limit: "5",
-        lang: "ko"
+        bbox: "124.5,33.0,131.9,38.7"
       });
       if (current) {
         params.set("lat", String(current.lat));
@@ -211,7 +213,7 @@ APP_HTML = r'''
       const response = await fetch(
         "https://photon.komoot.io/api/?" + params.toString()
       );
-      if (!response.ok) throw new Error("검색 서버 오류");
+      if (!response.ok) throw new Error("검색 서버 오류 (HTTP " + response.status + ")");
 
       const data = await response.json();
       const features = Array.isArray(data.features) ? data.features : [];
@@ -256,7 +258,7 @@ APP_HTML = r'''
       });
     } catch (e) {
       console.error(e);
-      text("searchStatus", "검색에 실패했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.");
+      text("searchStatus", "검색에 실패했어요. 잠시 후 다시 시도해 주세요. (" + e.message + ")");
       say("장소 검색에 실패했습니다.");
     } finally {
       el("search").disabled = false;
