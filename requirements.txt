@@ -1,5 +1,2 @@
-streamlit==1.56.0
-requests>=2.31,<3
-folium>=0.16,<1
-streamlit-folium>=0.20,<1
-streamlit-mic-recorder
+
+streamlit>=1.40.0,<2.0.0
