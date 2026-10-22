@@ -106,21 +106,21 @@ st.write("연결할 페이지의 주소를 입력하세요. 입력한 주소는 
 st.text_input(
     "알림벨 페이지 주소",
     key="bell_url",
-    placeholder="링크 삽입",
+    placeholder="https://blindmaid.streamlit.app/%EB%8F%84%EC%B0%A9%EC%A7%80%EC%84%A4%EC%A0%95",
     help="예: https://example.com/bell",
 )
 
 st.text_input(
     "음성 주의 페이지 주소",
     key="voice_url",
-    placeholder="링크 삽입",
+    placeholder="https://blindmaid.streamlit.app/%EC%86%8C%EB%A6%AC%EB%A1%9C_%EC%95%88%EB%82%B4%ED%95%98%EB%8A%94_%EA%B8%B8%EC%9E%A1%EC%9D%B4",
     help="예: https://example.com/voice",
 )
 
 st.text_input(
     "진동 알림 페이지 주소",
     key="vibrate_url",
-    placeholder="링크 삽입",
+    placeholder="https://blindmaid.streamlit.app/%EC%A3%BC%EB%B3%80%EC%97%90_%EB%B0%A9%ED%95%B4%EB%AC%BC%EC%9D%84_%EC%A7%84%EB%8F%99%EC%9C%BC%EB%A1%9C_%EC%95%8C%EB%A0%A4%EC%A4%8C.py",
     help="예: https://example.com/vibrate",
 )
 
