@@ -32,33 +32,28 @@ div.stButton > button {
     font-weight: bold;
     min-height: 44px;
 }
-div[data-testid="stForm"] {
-    background: white;
-    border-radius: 20px;
-    padding: 20px;
-}
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🩵 소리로 안내하는 길잡이")
-st.write("음성과 지도 안내를 이용해 목적지를 찾아봐요!")
-st.info("학교 프로젝트용 체험 앱입니다. 실제 이동 시에는 주변을 직접 확인하고 보호자나 안전한 길 안내를 함께 이용하세요.")
+st.write("목적지를 입력하면 경로와 음성 안내를 확인할 수 있어요!")
+st.info(
+    "학교 프로젝트용 시제품입니다. 실시간 위치 추적이나 "
+    "횡단보도·계단 감지 기능은 없으므로 실제 이동 안내로 사용하지 마세요."
+)
 
-st.subheader("📍 어디로 갈까요?")
-
-start = st.text_input("출발지", placeholder="예: 서울역")
-destination = st.text_input("도착지", placeholder="예: 서울시청")
+start = st.text_input("📍 출발지", placeholder="예: 서울역")
+destination = st.text_input("🏁 도착지", placeholder="예: 서울시청")
 
 transport = st.radio(
-    "이동 방법을 선택해 주세요",
+    "🚦 이동 방법",
     ["🚶 도보", "🚗 자동차", "🚌 대중교통", "🚇 지하철"],
     horizontal=True
 )
 
 def find_place(place):
-    url = "https://nominatim.openstreetmap.org/search"
     response = requests.get(
-        url,
+        "https://nominatim.openstreetmap.org/search",
         params={
             "q": place,
             "format": "jsonv2",
@@ -79,9 +74,12 @@ def find_place(place):
         float(results[0]["lon"])
     ]
 
-def get_route(origin, target, walking=False):
+def get_route(origin, target, walking):
     if walking:
-        base = "https://routing.openstreetmap.de/routed-foot/route/v1/driving/"
+        base = (
+            "https://routing.openstreetmap.de/"
+            "routed-foot/route/v1/driving/"
+        )
     else:
         base = "https://router.project-osrm.org/route/v1/driving/"
 
@@ -92,7 +90,11 @@ def get_route(origin, target, walking=False):
 
     response = requests.get(
         url,
-        params={"overview": "full", "geometries": "geojson", "steps": "true"},
+        params={
+            "overview": "full",
+            "geometries": "geojson",
+            "steps": "true"
+        },
         timeout=25
     )
     response.raise_for_status()
@@ -105,94 +107,153 @@ def get_route(origin, target, walking=False):
 
 def format_distance(meters):
     if meters < 1000:
-        return f"{round(meters)}m"
-    return f"{meters / 1000:.1f}km"
+        return f"{round(meters)}미터"
+    return f"{meters / 1000:.1f}킬로미터"
+
+def describe_step(step, walking):
+    distance = step.get("distance", 0)
+    name = step.get("name") or "현재 길"
+    maneuver = step.get("maneuver", {})
+    action = maneuver.get("type", "")
+    modifier = maneuver.get("modifier", "")
+
+    if action == "depart":
+        beginning = "출발하세요"
+    elif action == "arrive":
+        return "목적지에 도착했습니다."
+    elif action == "turn":
+        directions = {
+            "left": "왼쪽으로",
+            "right": "오른쪽으로",
+            "slight left": "왼쪽 방향으로",
+            "slight right": "오른쪽 방향으로",
+            "sharp left": "왼쪽으로 크게",
+            "sharp right": "오른쪽으로 크게",
+            "uturn": "유턴하여"
+        }
+        beginning = directions.get(
+            modifier, "방향을 확인하며"
+        ) + " 이동하세요"
+    elif action == "roundabout":
+        beginning = "회전 구간에서 안내된 방향으로 이동하세요"
+    elif action == "new name":
+        beginning = "길이 이어집니다"
+    else:
+        beginning = "계속 이동하세요"
+
+    if walking:
+        mode = "걸어가세요"
+    else:
+        mode = "주행하세요"
+
+    if action in ["turn", "roundabout"]:
+        sentence = beginning
+    elif action == "arrive":
+        sentence = beginning
+    elif action == "depart":
+        sentence = beginning
+    else:
+        sentence = f"{name} 방향으로 {mode}"
+
+    if distance >= 20 and action != "arrive":
+        sentence += f". 약 {format_distance(distance)} 이동하세요"
+
+    return sentence + "."
 
 def make_instructions(route, walking):
     instructions = []
 
     for leg in route.get("legs", []):
         for step in leg.get("steps", []):
-            name = step.get("name") or "현재 길"
             distance = step.get("distance", 0)
 
-            if distance < 20:
+            if distance < 10 and step.get("maneuver", {}).get("type") != "arrive":
                 continue
 
-            if walking:
-                sentence = f"{name} 방향으로 약 {format_distance(distance)} 걸어가세요."
-            else:
-                sentence = f"{name} 도로를 따라 약 {format_distance(distance)} 이동하세요."
+            sentence = describe_step(step, walking)
 
-            instructions.append(sentence)
-
-            if len(instructions) >= 6:
-                break
-
-        if len(instructions) >= 6:
-            break
+            if sentence not in instructions:
+                instructions.append(sentence)
 
     if not instructions:
-        instructions = ["지도에 표시된 경로를 따라 이동해 주세요."]
+        instructions = [
+            "지도에 표시된 경로를 확인하며 이동하세요."
+        ]
 
-    instructions.append("목적지에 도착했습니다.")
+    if "목적지에 도착했습니다." not in instructions:
+        instructions.append("목적지에 도착했습니다.")
+
     return instructions
 
 if "guidance_text" not in st.session_state:
     st.session_state.guidance_text = (
         "안녕하세요! 소리로 안내하는 길잡이입니다. "
-        "출발지와 도착지를 입력하고 길 찾기를 눌러 주세요."
+        "출발지와 도착지를 입력한 뒤 길 찾기를 눌러 주세요."
     )
+
+if "instructions" not in st.session_state:
+    st.session_state.instructions = []
+
+if "route_map" not in st.session_state:
+    st.session_state.route_map = None
+
+if "route_url" not in st.session_state:
+    st.session_state.route_url = None
 
 if st.button("🔎 길 찾기", use_container_width=True):
     if not start.strip() or not destination.strip():
         st.warning("출발지와 도착지를 모두 입력해 주세요.")
     else:
         try:
-            with st.spinner("장소와 경로를 찾고 있어요..."):
+            with st.spinner("경로를 찾고 있어요..."):
                 origin = find_place(start.strip())
                 target = find_place(destination.strip())
 
-                if origin is None:
-                    st.error("출발지를 찾지 못했어요. 장소 이름을 조금 더 자세히 입력해 주세요.")
-                elif target is None:
-                    st.error("도착지를 찾지 못했어요. 장소 이름을 조금 더 자세히 입력해 주세요.")
+                if origin is None or target is None:
+                    st.error(
+                        "장소를 찾지 못했어요. 이름을 더 자세히 입력해 주세요."
+                    )
+
                 elif transport in ["🚌 대중교통", "🚇 지하철"]:
-                    mode = "transit"
                     url = (
                         "https://www.google.com/maps/dir/?api=1"
                         f"&origin={requests.utils.quote(start.strip())}"
                         f"&destination={requests.utils.quote(destination.strip())}"
-                        f"&travelmode={mode}"
+                        "&travelmode=transit"
                     )
+
                     if transport == "🚇 지하철":
                         url += "&transit_mode=subway"
 
-                    st.session_state.guidance_text = (
-                        f"{transport[2:]} 경로를 확인해 주세요. "
-                        f"출발지는 {start}, 도착지는 {destination}입니다. "
-                        "아래 링크를 열어 실제 대중교통 경로를 확인하세요."
-                    )
+                    instructions = [
+                        f"출발지는 {start}입니다.",
+                        f"도착지는 {destination}입니다.",
+                        "아래 대중교통 경로 링크를 열어 "
+                        "승차역, 환승역, 하차역을 확인해 주세요.",
+                        "실제 운행 정보와 도착 정보를 확인하세요."
+                    ]
+
+                    st.session_state.instructions = instructions
+                    st.session_state.guidance_text = " ".join(instructions)
                     st.session_state.route_url = url
                     st.session_state.route_map = None
-                    st.session_state.instructions = [
-                        f"출발지 {start}에서 출발합니다.",
-                        f"목적지 {destination}까지 {transport[2:]} 경로를 확인해 주세요.",
-                        "환승과 도착 정보를 지도 앱에서 확인해 주세요."
-                    ]
-                    st.success("경로 안내를 준비했어요!")
+                    st.session_state.route_summary = ""
+
+                    st.success("대중교통 경로 안내를 준비했어요!")
 
                 else:
                     walking = transport == "🚶 도보"
-                    route = get_route(origin, target, walking=walking)
+                    route = get_route(origin, target, walking)
 
                     if route is None:
-                        st.error("경로를 찾지 못했어요. 잠시 후 다시 시도해 주세요.")
+                        st.error("경로를 찾지 못했어요. 다시 시도해 주세요.")
                     else:
                         instructions = make_instructions(route, walking)
+
                         st.session_state.instructions = instructions
                         st.session_state.guidance_text = (
-                            f"출발지 {start}에서 출발합니다. "
+                            f"{transport[2:]} 안내를 시작합니다. "
+                            f"출발지는 {start}입니다. "
                             + " ".join(instructions)
                         )
                         st.session_state.route_url = None
@@ -202,6 +263,7 @@ if st.button("🔎 길 찾기", use_container_width=True):
                             zoom_start=13,
                             tiles="OpenStreetMap"
                         )
+
                         folium.Marker(
                             origin,
                             tooltip="출발지",
@@ -217,131 +279,140 @@ if st.button("🔎 길 찾기", use_container_width=True):
                         ).add_to(route_map)
 
                         coordinates = [
-                            [point[1], point[0]]
-                            for point in route["geometry"]["coordinates"]
+                            [p[1], p[0]]
+                            for p in route["geometry"]["coordinates"]
                         ]
 
                         folium.PolyLine(
                             coordinates,
                             color="#8A83E8",
-                            weight=6,
-                            opacity=0.85
+                            weight=6
                         ).add_to(route_map)
 
                         route_map.fit_bounds(coordinates)
+
                         st.session_state.route_map = route_map
                         st.session_state.route_summary = (
                             f"거리: {format_distance(route['distance'])} · "
                             f"예상 시간: {round(route['duration'] / 60)}분"
                         )
-                        st.success("길을 찾았어요!")
+
+                        st.success("경로를 찾았어요!")
 
         except requests.RequestException:
-            st.error("경로 서비스에 연결하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.")
+            st.error(
+                "지도 서비스에 연결하지 못했어요. "
+                "인터넷 연결을 확인하고 다시 시도해 주세요."
+            )
         except (KeyError, ValueError, TypeError):
-            st.error("경로 정보를 처리하는 중 문제가 생겼어요. 다시 시도해 주세요.")
+            st.error("경로 정보를 처리하지 못했어요. 다시 시도해 주세요.")
 
-if st.session_state.get("route_url"):
-    st.markdown(
-        f"[🗺️ 대중교통 경로 열기]({st.session_state.route_url})"
+if st.session_state.route_url:
+    st.link_button(
+        "🗺️ 대중교통 경로 자세히 보기",
+        st.session_state.route_url,
+        use_container_width=True
     )
 
-if st.session_state.get("route_map") is not None:
+if st.session_state.route_map is not None:
     st.subheader("🗺️ 경로 지도")
-    st.write(st.session_state.get("route_summary", ""))
+    st.write(st.session_state.route_summary)
     st_folium(
         st.session_state.route_map,
-        width=None,
         height=400,
-        key="route_map_display"
+        use_container_width=True,
+        key="route_map"
     )
 
-if st.session_state.get("instructions"):
-    st.subheader("🧭 길 안내")
-    for i, instruction in enumerate(st.session_state.instructions, 1):
-        st.markdown(f"**{i}.** {instruction}")
+if st.session_state.instructions:
+    st.subheader("🧭 단계별 길 안내")
+
+    for number, instruction in enumerate(
+        st.session_state.instructions, 1
+    ):
+        st.markdown(f"**{number}.** {instruction}")
 
 st.divider()
-st.subheader("🔊 음성 안내")
-
-st.write("아래 버튼을 누르면 안내 내용을 한국어 음성으로 읽어 줘요.")
+st.subheader("🔊 음성으로 경로 듣기")
+st.write("버튼을 누르면 안내 문장을 순서대로 읽어 줘요.")
 
 speech_text = st.session_state.guidance_text
 
 components.html(
     f"""
-    <div style="
-        display:flex;
-        gap:10px;
-        flex-wrap:wrap;
-        font-family:sans-serif;">
-      <button id="speak" style="
-        background:#DCD6FF;
-        color:#35345A;
-        border:0;
-        border-radius:14px;
-        padding:13px 18px;
-        font-size:16px;
-        font-weight:bold;
-        cursor:pointer;">
-        🔊 음성 안내 시작
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button id="play" style="
+        background:#DCD6FF;color:#35345A;border:0;
+        border-radius:14px;padding:13px 18px;
+        font-size:16px;font-weight:bold;cursor:pointer;">
+        🔊 전체 경로 듣기
       </button>
       <button id="stop" style="
-        background:#E2F2FF;
-        color:#354C70;
-        border:0;
-        border-radius:14px;
-        padding:13px 18px;
-        font-size:16px;
-        font-weight:bold;
-        cursor:pointer;">
-        ⏹️ 음성 중지
+        background:#E2F2FF;color:#354C70;border:0;
+        border-radius:14px;padding:13px 18px;
+        font-size:16px;font-weight:bold;cursor:pointer;">
+        ⏹️ 중지
       </button>
     </div>
     <p id="status" style="font-size:13px;color:#536A9D;">
-      버튼을 누르면 안내를 읽어 줘요.
+      전체 경로 듣기를 눌러 주세요.
     </p>
     <script>
-      const textToRead = {json.dumps(speech_text, ensure_ascii=False)};
+      const text = {json.dumps(speech_text, ensure_ascii=False)};
       const status = document.getElementById("status");
 
-      document.getElementById("speak").addEventListener("click", () => {{
+      document.getElementById("play").onclick = () => {{
         if (!("speechSynthesis" in window)) {{
-          status.textContent = "이 브라우저에서는 음성 안내를 지원하지 않아요.";
+          status.textContent = "현재 브라우저에서 음성 기능을 사용할 수 없어요.";
           return;
         }}
 
         window.speechSynthesis.cancel();
 
-        const message = new SpeechSynthesisUtterance(textToRead);
-        message.lang = "ko-KR";
-        message.rate = 0.9;
+        const parts = text.split(/(?<=\\.)\\s+/).filter(x => x.trim());
+        let index = 0;
 
-        message.onstart = () => {{
-          status.textContent = "🔊 음성 안내 중이에요.";
-        }};
+        function readNext() {{
+          if (index >= parts.length) {{
+            status.textContent = "전체 안내가 끝났어요.";
+            return;
+          }}
 
-        message.onend = () => {{
-          status.textContent = "안내가 끝났어요.";
-        }};
+          const message = new SpeechSynthesisUtterance(parts[index]);
+          message.lang = "ko-KR";
+          message.rate = 0.9;
 
-        message.onerror = () => {{
-          status.textContent = "음성을 재생하지 못했어요. 기기 음량과 브라우저 설정을 확인해 주세요.";
-        }};
+          message.onstart = () => {{
+            status.textContent =
+              "🔊 안내 중 (" + (index + 1) + "/" + parts.length + ")";
+          }};
 
-        window.speechSynthesis.speak(message);
-      }});
+          message.onend = () => {{
+            index++;
+            readNext();
+          }};
 
-      document.getElementById("stop").addEventListener("click", () => {{
+          message.onerror = () => {{
+            status.textContent = "음성을 재생하지 못했어요.";
+          }};
+
+          window.speechSynthesis.speak(message);
+        }}
+
+        readNext();
+      }};
+
+      document.getElementById("stop").onclick = () => {{
         window.speechSynthesis.cancel();
         status.textContent = "음성 안내를 중지했어요.";
-      }});
+      }};
     </script>
     """,
     height=100
 )
 
 st.caption(
-    "안내 음성은 브라우저의 음성 합성 기능을 사용합니다. "
-    "이 앱은 시범용으로, 실시간 GPS 추적이나 횡단보도·계단 감지 기능은 제공하지 않습니다."
+    "이 시제품은 경로 안내 문장을 읽어 주지만, "
+    "GPS로 현재 위치를 추적해 다음 회전 지점에서 자동 안내하지는 않습니다. "
+    "대중교통의 상세 승하차 안내는 연결된 지도 서비스에서 확인해야 합니다."
 )
