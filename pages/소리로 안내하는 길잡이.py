@@ -1,528 +1,347 @@
 
 import json
-from urllib.parse import urlencode
-
-import folium
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
+import folium
 from streamlit_folium import st_folium
 
-# =====================================
-# 1. 기본 설정
-# =====================================
 st.set_page_config(
     page_title="소리로 안내하는 길잡이",
-    page_icon="🐰",
-    layout="wide",
+    page_icon="🩵",
+    layout="centered"
 )
 
-HEADERS = {
-    "User-Agent": "SoriroGiljabiStudentProject/3.0"
-}
-
-# =====================================
-# 2. 귀여운 파스텔 디자인
-# =====================================
 st.markdown("""
 <style>
 .stApp {
-    background: linear-gradient(
-        145deg, #eff8ff 0%, #f3efff 60%, #fff2f8 100%
-    );
-    color: #34415e;
+    background: linear-gradient(180deg, #F1F7FF, #FBF8FF);
 }
 .block-container {
-    max-width: 1050px;
-    padding-top: 1.5rem;
-    padding-bottom: 3rem;
+    max-width: 850px;
+    padding-top: 2rem;
 }
-.hero {
-    background: linear-gradient(120deg, #c7e7ff, #e1d6ff, #ffe2f0);
-    border: 2px solid white;
-    border-radius: 30px;
-    padding: 25px 16px;
-    text-align: center;
-    box-shadow: 0 8px 24px #9daed522;
-    margin-bottom: 20px;
-}
-.hero h1 {
-    color: #34456b;
-    font-size: 31px;
-    margin-bottom: 7px;
-}
-.hero p {
-    color: #526080;
-    margin-bottom: 0;
+h1, h2, h3 {
+    color: #536A9D;
 }
 div.stButton > button {
-    border-radius: 16px;
-    min-height: 46px;
-    font-weight: 600;
-    border: 1px solid #dce5ff;
+    border-radius: 15px;
+    border: 0;
+    background-color: #DCD6FF;
+    color: #35345A;
+    font-weight: bold;
+    min-height: 44px;
 }
-div.stButton > button[kind="primary"] {
-    background: linear-gradient(100deg, #8abaff, #b5a3ff);
-    color: white;
-    border: none;
-}
-div[data-testid="stMetric"] {
+div[data-testid="stForm"] {
     background: white;
-    border: 1px solid #e4e9ff;
-    border-radius: 18px;
-    padding: 14px;
-}
-.step-card {
-    background: white;
-    border: 1px solid #e2e8ff;
-    border-radius: 16px;
-    padding: 12px 15px;
-    margin: 8px 0;
-    color: #34415e;
-}
-.small-note {
-    background: #f0edff;
-    border-radius: 16px;
-    padding: 14px;
-    color: #4e527a;
+    border-radius: 20px;
+    padding: 20px;
 }
 </style>
-
-<div class="hero">
-    <div style="font-size:42px;">🐰 🔊 🐾</div>
-    <h1>소리로 안내하는 길잡이</h1>
-    <p>한 걸음씩, 쉽고 편안하게 목적지까지 💙</p>
-</div>
 """, unsafe_allow_html=True)
 
-st.markdown("""
-<div class="small-note">
-<b>🩵 반가워요!</b><br>
-출발지와 도착지를 입력하고 이동 방법을 선택해 보세요.
-경로를 찾으면 지도와 짧은 안내 문장, 음성 안내를 확인할 수 있어요.
-</div>
-""", unsafe_allow_html=True)
+st.title("🩵 소리로 안내하는 길잡이")
+st.write("음성과 지도 안내를 이용해 목적지를 찾아봐요!")
+st.info("학교 프로젝트용 체험 앱입니다. 실제 이동 시에는 주변을 직접 확인하고 보호자나 안전한 길 안내를 함께 이용하세요.")
 
-st.write("")
+st.subheader("📍 어디로 갈까요?")
 
-# =====================================
-# 3. 장소 검색
-# =====================================
-@st.cache_data(ttl=3600)
+start = st.text_input("출발지", placeholder="예: 서울역")
+destination = st.text_input("도착지", placeholder="예: 서울시청")
+
+transport = st.radio(
+    "이동 방법을 선택해 주세요",
+    ["🚶 도보", "🚗 자동차", "🚌 대중교통", "🚇 지하철"],
+    horizontal=True
+)
+
 def find_place(place):
+    url = "https://nominatim.openstreetmap.org/search"
     response = requests.get(
-        "https://nominatim.openstreetmap.org/search",
+        url,
         params={
             "q": place,
             "format": "jsonv2",
             "limit": 1,
-            "countrycodes": "kr",
+            "countrycodes": "kr"
         },
-        headers=HEADERS,
-        timeout=15,
+        headers={"User-Agent": "SoriroGiljabiSchoolProject/1.0"},
+        timeout=15
     )
     response.raise_for_status()
     results = response.json()
 
     if not results:
-        raise ValueError(
-            f"'{place}' 장소를 찾지 못했어요. "
-            "역 이름이나 지역명을 더 정확하게 입력해 주세요."
-        )
+        return None
 
-    return float(results[0]["lat"]), float(results[0]["lon"])
+    return [
+        float(results[0]["lat"]),
+        float(results[0]["lon"])
+    ]
 
-
-# =====================================
-# 4. 도보 / 자동차 경로 검색
-# =====================================
-@st.cache_data(ttl=600)
-def get_route(start, end, mode):
-    start_lat, start_lon = find_place(start)
-    end_lat, end_lon = find_place(end)
-
-    if mode == "도보":
-        base_url = (
-            "https://routing.openstreetmap.de/"
-            "routed-foot/route/v1/driving/"
-        )
+def get_route(origin, target, walking=False):
+    if walking:
+        base = "https://routing.openstreetmap.de/routed-foot/route/v1/driving/"
     else:
-        base_url = "https://router.project-osrm.org/route/v1/driving/"
+        base = "https://router.project-osrm.org/route/v1/driving/"
 
     url = (
-        f"{base_url}{start_lon},{start_lat};"
-        f"{end_lon},{end_lat}"
+        base
+        + f"{origin[1]},{origin[0]};{target[1]},{target[0]}"
     )
 
     response = requests.get(
         url,
-        params={
-            "overview": "full",
-            "geometries": "geojson",
-            "steps": "true",
-        },
-        headers=HEADERS,
-        timeout=30,
+        params={"overview": "full", "geometries": "geojson", "steps": "true"},
+        timeout=25
     )
     response.raise_for_status()
     data = response.json()
 
-    if data.get("code") != "Ok" or not data.get("routes"):
-        raise ValueError(
-            "경로를 찾지 못했어요. 장소를 다시 확인해 주세요."
-        )
+    if not data.get("routes"):
+        return None
 
-    return {
-        "start": (start_lat, start_lon),
-        "end": (end_lat, end_lon),
-        "route": data["routes"][0],
-    }
+    return data["routes"][0]
 
+def format_distance(meters):
+    if meters < 1000:
+        return f"{round(meters)}m"
+    return f"{meters / 1000:.1f}km"
 
-# =====================================
-# 5. 짧은 길 안내 문장 생성
-# =====================================
-def make_short_steps(route):
-    steps = []
+def make_instructions(route, walking):
+    instructions = []
 
     for leg in route.get("legs", []):
-        for item in leg.get("steps", []):
-            maneuver = item.get("maneuver", {})
-            kind = maneuver.get("type", "")
-            modifier = maneuver.get("modifier", "")
-            distance = item.get("distance", 0)
-            road = item.get("name") or "앞쪽 길"
+        for step in leg.get("steps", []):
+            name = step.get("name") or "현재 길"
+            distance = step.get("distance", 0)
 
-            if kind == "depart":
-                sentence = f"{road} 방향으로 출발하세요."
-            elif kind == "arrive":
-                sentence = "목적지에 도착했어요!"
-            elif kind in ("turn", "end of road", "fork"):
-                directions = {
-                    "left": "왼쪽",
-                    "right": "오른쪽",
-                    "slight left": "약간 왼쪽",
-                    "slight right": "약간 오른쪽",
-                    "sharp left": "크게 왼쪽",
-                    "sharp right": "크게 오른쪽",
-                    "straight": "직진",
-                    "uturn": "유턴",
-                }
-                direction = directions.get(modifier, "안내된 방향")
-                sentence = f"{direction}으로 이동하세요."
-            elif kind in ("roundabout", "rotary"):
-                sentence = "회전 구간에서는 방향을 확인하세요."
+            if distance < 20:
+                continue
+
+            if walking:
+                sentence = f"{name} 방향으로 약 {format_distance(distance)} 걸어가세요."
             else:
-                sentence = f"{road} 방향으로 계속 이동하세요."
+                sentence = f"{name} 도로를 따라 약 {format_distance(distance)} 이동하세요."
 
-            if distance >= 100:
-                sentence += f" 약 {round(distance / 10) * 10:.0f}미터 이동하세요."
-            elif distance >= 20:
-                sentence += f" 약 {round(distance / 10) * 10:.0f}미터 이동하세요."
+            instructions.append(sentence)
 
-            steps.append(sentence)
+            if len(instructions) >= 6:
+                break
 
-    # 같은 안내가 반복되는 것을 줄이기
-    unique_steps = []
-    for sentence in steps:
-        if not unique_steps or sentence != unique_steps[-1]:
-            unique_steps.append(sentence)
+        if len(instructions) >= 6:
+            break
 
-    if not unique_steps:
-        unique_steps = ["지도에서 경로를 확인해 주세요."]
+    if not instructions:
+        instructions = ["지도에 표시된 경로를 따라 이동해 주세요."]
 
-    # 안내가 너무 길어지지 않도록 최대 5개만 표시
-    if len(unique_steps) > 5:
-        unique_steps = unique_steps[:4] + [
-            "이후 경로는 지도를 확인해 주세요."
-        ]
+    instructions.append("목적지에 도착했습니다.")
+    return instructions
 
-    return unique_steps
-
-
-# =====================================
-# 6. 출발지 / 도착지 / 이동 방법
-# =====================================
-with st.container(border=True):
-    st.subheader("📍 어디로 가고 싶나요?")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        start = st.text_input("출발지", "서울역")
-
-    with col2:
-        end = st.text_input("도착지", "두정역")
-
-    st.markdown("### 🐾 이동 방법을 선택해 주세요")
-
-    mode_label = st.radio(
-        "이동 방법",
-        ["🚶 도보", "🚗 자동차", "🚌 대중교통", "🚇 지하철"],
-        horizontal=True,
-        label_visibility="collapsed",
+if "guidance_text" not in st.session_state:
+    st.session_state.guidance_text = (
+        "안녕하세요! 소리로 안내하는 길잡이입니다. "
+        "출발지와 도착지를 입력하고 길 찾기를 눌러 주세요."
     )
 
-    if st.button(
-        "💜 길 찾기!",
-        type="primary",
-        use_container_width=True,
-    ):
-        if not start.strip() or not end.strip():
-            st.warning("출발지와 도착지를 모두 입력해 주세요.")
-        elif start.strip() == end.strip():
-            st.warning("출발지와 도착지를 다르게 입력해 주세요.")
-        else:
-            st.session_state.pop("route_result", None)
-            st.session_state["search_request"] = (
-                start.strip(),
-                end.strip(),
-                mode_label,
-            )
-
-# =====================================
-# 7. 검색 결과
-# =====================================
-if "search_request" in st.session_state:
-    start_name, end_name, selected_mode = (
-        st.session_state["search_request"]
-    )
-
-    st.markdown("---")
-
-    # 대중교통 / 지하철
-    if selected_mode in ["🚌 대중교통", "🚇 지하철"]:
-        params = {
-            "api": "1",
-            "origin": start_name,
-            "destination": end_name,
-            "travelmode": "transit",
-        }
-
-        if selected_mode == "🚇 지하철":
-            params["transit_mode"] = "subway"
-
-        maps_url = (
-            "https://www.google.com/maps/dir/?"
-            + urlencode(params)
-        )
-
-        if selected_mode == "🚇 지하철":
-            st.subheader("🚇 지하철 경로")
-            st.write("지하철 노선과 환승 정보를 확인해 보세요.")
-        else:
-            st.subheader("🚌 대중교통 경로")
-            st.write("버스와 지하철을 포함한 대중교통 경로를 확인해 보세요.")
-
-        st.link_button(
-            "💙 경로 및 환승 정보 확인하기",
-            maps_url,
-            use_container_width=True,
-        )
-
-        st.info(
-            "대중교통 경로는 외부 지도 서비스에서 제공해요. "
-            "실시간 도착 시간과 환승 안내는 해당 서비스에서 확인해 주세요."
-        )
-
-    # 도보 / 자동차
+if st.button("🔎 길 찾기", use_container_width=True):
+    if not start.strip() or not destination.strip():
+        st.warning("출발지와 도착지를 모두 입력해 주세요.")
     else:
-        route_mode = (
-            "도보" if selected_mode == "🚶 도보" else "자동차"
-        )
+        try:
+            with st.spinner("장소와 경로를 찾고 있어요..."):
+                origin = find_place(start.strip())
+                target = find_place(destination.strip())
 
-        with st.spinner("🐾 길을 찾고 있어요..."):
-            try:
-                result = get_route(
-                    start_name,
-                    end_name,
-                    route_mode,
-                )
-                st.session_state["route_result"] = (
-                    result,
-                    start_name,
-                    end_name,
-                    route_mode,
-                )
+                if origin is None:
+                    st.error("출발지를 찾지 못했어요. 장소 이름을 조금 더 자세히 입력해 주세요.")
+                elif target is None:
+                    st.error("도착지를 찾지 못했어요. 장소 이름을 조금 더 자세히 입력해 주세요.")
+                elif transport in ["🚌 대중교통", "🚇 지하철"]:
+                    mode = "transit"
+                    url = (
+                        "https://www.google.com/maps/dir/?api=1"
+                        f"&origin={requests.utils.quote(start.strip())}"
+                        f"&destination={requests.utils.quote(destination.strip())}"
+                        f"&travelmode={mode}"
+                    )
+                    if transport == "🚇 지하철":
+                        url += "&transit_mode=subway"
 
-            except ValueError as e:
-                st.error(str(e))
-                st.session_state.pop("route_result", None)
+                    st.session_state.guidance_text = (
+                        f"{transport[2:]} 경로를 확인해 주세요. "
+                        f"출발지는 {start}, 도착지는 {destination}입니다. "
+                        "아래 링크를 열어 실제 대중교통 경로를 확인하세요."
+                    )
+                    st.session_state.route_url = url
+                    st.session_state.route_map = None
+                    st.session_state.instructions = [
+                        f"출발지 {start}에서 출발합니다.",
+                        f"목적지 {destination}까지 {transport[2:]} 경로를 확인해 주세요.",
+                        "환승과 도착 정보를 지도 앱에서 확인해 주세요."
+                    ]
+                    st.success("경로 안내를 준비했어요!")
 
-            except requests.exceptions.Timeout:
-                st.error("서버 응답이 늦어요. 잠시 후 다시 시도해 주세요.")
-                st.session_state.pop("route_result", None)
+                else:
+                    walking = transport == "🚶 도보"
+                    route = get_route(origin, target, walking=walking)
 
-            except requests.exceptions.RequestException:
-                st.error("지도 서버에 연결할 수 없어요. 다시 시도해 주세요.")
-                st.session_state.pop("route_result", None)
+                    if route is None:
+                        st.error("경로를 찾지 못했어요. 잠시 후 다시 시도해 주세요.")
+                    else:
+                        instructions = make_instructions(route, walking)
+                        st.session_state.instructions = instructions
+                        st.session_state.guidance_text = (
+                            f"출발지 {start}에서 출발합니다. "
+                            + " ".join(instructions)
+                        )
+                        st.session_state.route_url = None
 
-            except Exception:
-                st.error("오류가 발생했어요. 장소를 확인하고 다시 시도해 주세요.")
-                st.session_state.pop("route_result", None)
+                        route_map = folium.Map(
+                            location=origin,
+                            zoom_start=13,
+                            tiles="OpenStreetMap"
+                        )
+                        folium.Marker(
+                            origin,
+                            tooltip="출발지",
+                            popup=start,
+                            icon=folium.Icon(color="green")
+                        ).add_to(route_map)
 
+                        folium.Marker(
+                            target,
+                            tooltip="도착지",
+                            popup=destination,
+                            icon=folium.Icon(color="red")
+                        ).add_to(route_map)
 
-# =====================================
-# 8. 지도 / 거리 / 시간 / 음성 안내
-# =====================================
-if "route_result" in st.session_state:
-    result, start_name, end_name, route_mode = (
-        st.session_state["route_result"]
+                        coordinates = [
+                            [point[1], point[0]]
+                            for point in route["geometry"]["coordinates"]
+                        ]
+
+                        folium.PolyLine(
+                            coordinates,
+                            color="#8A83E8",
+                            weight=6,
+                            opacity=0.85
+                        ).add_to(route_map)
+
+                        route_map.fit_bounds(coordinates)
+                        st.session_state.route_map = route_map
+                        st.session_state.route_summary = (
+                            f"거리: {format_distance(route['distance'])} · "
+                            f"예상 시간: {round(route['duration'] / 60)}분"
+                        )
+                        st.success("길을 찾았어요!")
+
+        except requests.RequestException:
+            st.error("경로 서비스에 연결하지 못했어요. 인터넷 연결을 확인하고 다시 시도해 주세요.")
+        except (KeyError, ValueError, TypeError):
+            st.error("경로 정보를 처리하는 중 문제가 생겼어요. 다시 시도해 주세요.")
+
+if st.session_state.get("route_url"):
+    st.markdown(
+        f"[🗺️ 대중교통 경로 열기]({st.session_state.route_url})"
     )
 
-    route = result["route"]
-    start_lat, start_lon = result["start"]
-    end_lat, end_lon = result["end"]
-
-    icon = "🚶" if route_mode == "도보" else "🚗"
-
-    st.subheader(f"{icon} {route_mode} 안내")
-
-    col1, col2 = st.columns(2)
-
-    col1.metric("📏 예상 거리", f'{route["distance"] / 1000:.1f} km')
-    col2.metric("⏰ 예상 시간", f'{route["duration"] / 60:.0f}분')
-
-    # 지도 만들기
-    coordinates = route["geometry"]["coordinates"]
-    points = [(lat, lon) for lon, lat in coordinates]
-
-    route_map = folium.Map(
-        location=[start_lat, start_lon],
-        zoom_start=12,
-    )
-
-    folium.Marker(
-        [start_lat, start_lon],
-        tooltip="출발지",
-        popup=start_name,
-        icon=folium.Icon(color="green", icon="play"),
-    ).add_to(route_map)
-
-    folium.Marker(
-        [end_lat, end_lon],
-        tooltip="도착지",
-        popup=end_name,
-        icon=folium.Icon(color="red", icon="flag"),
-    ).add_to(route_map)
-
-    folium.PolyLine(
-        points,
-        color="#8C91FF",
-        weight=6,
-        opacity=0.9,
-    ).add_to(route_map)
-
+if st.session_state.get("route_map") is not None:
+    st.subheader("🗺️ 경로 지도")
+    st.write(st.session_state.get("route_summary", ""))
     st_folium(
-        route_map,
-        use_container_width=True,
-        height=350,
-        returned_objects=[],
+        st.session_state.route_map,
+        width=None,
+        height=400,
+        key="route_map_display"
     )
 
-    # 짧은 안내
-    instructions = make_short_steps(route)
+if st.session_state.get("instructions"):
+    st.subheader("🧭 길 안내")
+    for i, instruction in enumerate(st.session_state.instructions, 1):
+        st.markdown(f"**{i}.** {instruction}")
 
-    st.subheader("🗣️ 귀로 듣는 길 안내")
+st.divider()
+st.subheader("🔊 음성 안내")
 
-    for i, sentence in enumerate(instructions, start=1):
-        st.markdown(
-            f'<div class="step-card"><b>{i}.</b> '
-            f'{sentence}</div>',
-            unsafe_allow_html=True,
-        )
+st.write("아래 버튼을 누르면 안내 내용을 한국어 음성으로 읽어 줘요.")
 
-    # 한국어 음성 합성
-    speech_text = " ".join(instructions)
-    safe_text = json.dumps(speech_text, ensure_ascii=False)
+speech_text = st.session_state.guidance_text
 
-    components.html(
-        f"""
-        <div style="
-            background:linear-gradient(120deg,#d8edff,#eee2ff);
-            border-radius:20px;
-            padding:18px;
-            text-align:center;
-            font-family:sans-serif;
-        ">
-          <div style="font-size:30px;">🐰🔊</div>
-          <h3 style="color:#34456b;">귀로 듣는 길 안내</h3>
-          <p style="color:#526080;">
-            버튼을 누르면 한국어 음성으로 읽어 줘요.
-          </p>
-
-          <button id="play" style="
-            background:#7e9fff;color:white;border:0;
-            border-radius:14px;padding:13px 18px;
-            font-size:16px;font-weight:bold;cursor:pointer;
-          ">🔊 안내 듣기</button>
-
-          <button id="stop" style="
-            background:white;color:#465477;border:1px solid #cbd6ff;
-            border-radius:14px;padding:13px 18px;
-            font-size:16px;cursor:pointer;
-          ">⏹️ 멈추기</button>
-
-          <p id="status" aria-live="polite" style="color:#465477;">
-            음성 안내를 시작할 준비가 됐어요.
-          </p>
-        </div>
-
-        <script>
-          const textToSpeak = {safe_text};
-          const status = document.getElementById("status");
-
-          document.getElementById("play").onclick = function() {{
-            if (!("speechSynthesis" in window)) {{
-              status.textContent =
-                "이 브라우저에서는 음성 안내를 지원하지 않아요.";
-              return;
-            }}
-
-            window.speechSynthesis.cancel();
-
-            const message = new SpeechSynthesisUtterance(textToSpeak);
-            message.lang = "ko-KR";
-            message.rate = 0.9;
-            message.pitch = 1.05;
-
-            message.onstart = function() {{
-              status.textContent = "🐾 길 안내를 읽고 있어요.";
-            }};
-
-            message.onend = function() {{
-              status.textContent = "💙 안내가 끝났어요!";
-            }};
-
-            message.onerror = function() {{
-              status.textContent =
-                "음성 재생에 실패했어요. 브라우저 설정을 확인해 주세요.";
-            }};
-
-            window.speechSynthesis.speak(message);
-          }};
-
-          document.getElementById("stop").onclick = function() {{
-            if ("speechSynthesis" in window) {{
-              window.speechSynthesis.cancel();
-            }}
-            status.textContent = "음성 안내를 멈췄어요.";
-          }};
-        </script>
-        """,
-        height=240,
-    )
-
-    st.markdown("""
-    <div class="small-note">
-    🩵 <b>안전 약속</b><br>
-    이 앱은 횡단보도, 계단, 공사 구간이나 주변 차량을
-    실시간으로 감지하지 못해요. 실제 이동 시에는 주변 안전을
-    확인하고 신뢰할 수 있는 보행 안내를 이용해 주세요.
+components.html(
+    f"""
+    <div style="
+        display:flex;
+        gap:10px;
+        flex-wrap:wrap;
+        font-family:sans-serif;">
+      <button id="speak" style="
+        background:#DCD6FF;
+        color:#35345A;
+        border:0;
+        border-radius:14px;
+        padding:13px 18px;
+        font-size:16px;
+        font-weight:bold;
+        cursor:pointer;">
+        🔊 음성 안내 시작
+      </button>
+      <button id="stop" style="
+        background:#E2F2FF;
+        color:#354C70;
+        border:0;
+        border-radius:14px;
+        padding:13px 18px;
+        font-size:16px;
+        font-weight:bold;
+        cursor:pointer;">
+        ⏹️ 음성 중지
+      </button>
     </div>
-    """, unsafe_allow_html=True)
+    <p id="status" style="font-size:13px;color:#536A9D;">
+      버튼을 누르면 안내를 읽어 줘요.
+    </p>
+    <script>
+      const textToRead = {json.dumps(speech_text, ensure_ascii=False)};
+      const status = document.getElementById("status");
 
-st.markdown("---")
+      document.getElementById("speak").addEventListener("click", () => {{
+        if (!("speechSynthesis" in window)) {{
+          status.textContent = "이 브라우저에서는 음성 안내를 지원하지 않아요.";
+          return;
+        }}
+
+        window.speechSynthesis.cancel();
+
+        const message = new SpeechSynthesisUtterance(textToRead);
+        message.lang = "ko-KR";
+        message.rate = 0.9;
+
+        message.onstart = () => {{
+          status.textContent = "🔊 음성 안내 중이에요.";
+        }};
+
+        message.onend = () => {{
+          status.textContent = "안내가 끝났어요.";
+        }};
+
+        message.onerror = () => {{
+          status.textContent = "음성을 재생하지 못했어요. 기기 음량과 브라우저 설정을 확인해 주세요.";
+        }};
+
+        window.speechSynthesis.speak(message);
+      }});
+
+      document.getElementById("stop").addEventListener("click", () => {{
+        window.speechSynthesis.cancel();
+        status.textContent = "음성 안내를 중지했어요.";
+      }});
+    </script>
+    """,
+    height=100
+)
+
 st.caption(
-    "🐰 소리로 안내하는 길잡이 · 학교 프로젝트용 시제품"
+    "안내 음성은 브라우저의 음성 합성 기능을 사용합니다. "
+    "이 앱은 시범용으로, 실시간 GPS 추적이나 횡단보도·계단 감지 기능은 제공하지 않습니다."
 )
