@@ -1,5 +1,7 @@
+import json
 
 import streamlit as st
+from streamlit_mic_recorder import speech_to_text
 
 st.set_page_config(
     page_title="소리길 - 음성 도착 알림",
@@ -7,12 +9,42 @@ st.set_page_config(
     layout="centered",
 )
 
+# ---------------------------------------------------------------
+# 음성 인식 결과 저장 (다시 실행돼도 유지되도록 session_state 사용)
+# ---------------------------------------------------------------
+if "voice_query" not in st.session_state:
+    st.session_state.voice_query = ""
+    st.session_state.voice_id = 0
+
+HERO_HTML = '''
+<div style="font-family:Arial,sans-serif;max-width:700px;margin:auto;background:#102a43;color:white;padding:22px;border-radius:18px">
+  <h1 style="color:white;margin:0 0 8px 0">소리길 🔔</h1>
+  <p style="margin:0">음성으로 목적지를 찾고, 거리를 확인하고, 도착 알림을 받아요.</p>
+</div>
+'''
+st.html(HERO_HTML)
+
+st.markdown("### 1. 목적지를 음성으로 말하기")
+st.caption("버튼을 누르고 장소 이름을 말한 뒤, 다시 버튼을 눌러 끝내세요. 크롬 또는 엣지에서 사용하세요.")
+
+spoken = speech_to_text(
+    language="ko",
+    start_prompt="🎙️ 말하기 시작",
+    stop_prompt="⏹ 말하기 끝",
+    just_once=True,
+    use_container_width=True,
+    key="destination_voice",
+)
+
+if spoken and spoken.strip():
+    st.session_state.voice_query = spoken.strip()
+    st.session_state.voice_id += 1
+
 APP_HTML = r'''
 <div id="soundroad">
 <style>
 #soundroad {font-family:Arial,sans-serif;color:#102a43;max-width:700px;margin:auto}
 #soundroad * {box-sizing:border-box}
-#soundroad .hero {background:#102a43;color:white;padding:22px;border-radius:18px}
 #soundroad .card {border:2px solid #cbd5e1;border-radius:16px;padding:18px;margin:14px 0}
 #soundroad button {width:100%;min-height:58px;padding:13px;margin:7px 0;border:2px solid #64748b;border-radius:12px;font-size:18px;font-weight:bold;cursor:pointer;background:#f1f5f9;color:#102a43}
 #soundroad button:focus,#soundroad input:focus {outline:4px solid #f59e0b}
@@ -25,30 +57,24 @@ APP_HTML = r'''
 #soundroad .result {text-align:left;background:white}
 </style>
 
-<section class="hero">
-<h1>소리길 🔔</h1>
-<p>음성으로 목적지를 찾고, 거리를 확인하고, 도착 알림을 받아요.</p>
-</section>
-
 <section class="card">
-<h2>1. 목적지 입력</h2>
-<button id="voice" class="primary">🎙️ 목적지를 음성으로 말하기</button>
-<label for="place">음성 인식이 안 되면 직접 입력하세요.</label>
+<h2>2. 목적지 검색</h2>
+<label for="place">음성으로 말한 목적지가 아래에 들어가요. 음성 인식이 안 되면 직접 입력하세요.</label>
 <input id="place" placeholder="예: 천안역">
 <button id="search">목적지 검색</button>
-<div id="searchStatus" class="status" role="status" aria-live="polite">목적지를 말하거나 입력해 주세요.</div>
+<div id="searchStatus" class="status" role="status" aria-live="polite">위의 말하기 버튼을 누르거나 목적지를 입력해 주세요.</div>
 <div id="results"></div>
 </section>
 
 <section class="card">
-<h2>2. 현재 위치 및 도착 알림</h2>
+<h2>3. 현재 위치 및 도착 알림</h2>
 <button id="start" class="primary">📍 위치 확인 및 알림 시작</button>
 <button id="stop" class="stop">■ 알림 중지</button>
 <div id="locationStatus" class="status" role="status" aria-live="polite">시작 버튼을 눌러 위치 권한을 허용해 주세요.</div>
 </section>
 
 <section class="card">
-<h2>3. 목적지까지 거리</h2>
+<h2>4. 목적지까지 거리</h2>
 <p class="muted">선택한 목적지</p>
 <div id="selected" class="metric">선택 전</div>
 <hr>
@@ -69,16 +95,25 @@ APP_HTML = r'''
 
 <script>
 (function () {
+  // 파이썬(음성 인식)에서 넘겨받은 값
+  const VOICE_QUERY = __VOICE_QUERY__;
+  const VOICE_ID = __VOICE_ID__;
+
   const root = document.getElementById("soundroad");
   if (!root || root.dataset.ready === "1") return;
   root.dataset.ready = "1";
+
+  // 새 음성 입력으로 화면이 다시 그려지면, 이전 화면의 위치 추적을 정리
+  const wasTracking = !!window.__soundroadTracking;
+  if (typeof window.__soundroadCleanup === "function") {
+    try { window.__soundroadCleanup(); } catch (e) {}
+  }
 
   const el = id => document.getElementById(id);
   let current = null;
   let destination = null;
   let watchId = null;
   let arrived = false;
-  let recognition = null;
   let routeBusy = false;
   let lastRouteTime = 0;
   let audio = null;
@@ -150,7 +185,7 @@ APP_HTML = r'''
     say("목적지 근처에 도착한 것으로 보여요. 주변을 확인해 주세요.");
   }
 
-  async function searchPlace() {
+  async function searchPlace(silentStart) {
     const query = el("place").value.trim();
     if (!query) {
       text("searchStatus", "목적지를 먼저 입력해 주세요.");
@@ -161,7 +196,6 @@ APP_HTML = r'''
     text("searchStatus", "장소를 검색하고 있어요.");
     el("results").replaceChildren();
     el("search").disabled = true;
-    el("voice").disabled = true;
 
     try {
       const params = new URLSearchParams({
@@ -189,6 +223,7 @@ APP_HTML = r'''
       }
 
       text("searchStatus", "검색 결과를 선택해 주세요.");
+      say("검색 결과 " + features.length + "개를 찾았어요. 아래에서 선택해 주세요.");
 
       features.forEach(feature => {
         const coords = feature.geometry && feature.geometry.coordinates;
@@ -225,7 +260,6 @@ APP_HTML = r'''
       say("장소 검색에 실패했습니다.");
     } finally {
       el("search").disabled = false;
-      el("voice").disabled = false;
     }
   }
 
@@ -313,7 +347,7 @@ APP_HTML = r'''
     say(message);
   }
 
-  function startTracking() {
+  function startTracking(silent) {
     if (!navigator.geolocation) {
       text("locationStatus", "이 브라우저는 위치 확인을 지원하지 않아요.");
       say("위치 확인을 지원하지 않는 브라우저입니다.");
@@ -333,13 +367,14 @@ APP_HTML = r'''
     if (watchId !== null) navigator.geolocation.clearWatch(watchId);
 
     text("locationStatus", "위치를 확인하고 있어요.");
-    say("위치 확인을 시작합니다.");
+    if (!silent) say("위치 확인을 시작합니다.");
 
     watchId = navigator.geolocation.watchPosition(
       positionSuccess,
       positionError,
       { enableHighAccuracy: true, maximumAge: 3000, timeout: 20000 }
     );
+    window.__soundroadTracking = true;
     if (destination) calculateRoute(true);
   }
 
@@ -348,69 +383,55 @@ APP_HTML = r'''
       navigator.geolocation.clearWatch(watchId);
       watchId = null;
     }
+    window.__soundroadTracking = false;
     text("locationStatus", "위치 확인을 중지했어요.");
     text("arrivalStatus", "알림이 중지됐어요.");
     say("위치 확인을 중지했습니다.");
   }
 
-  el("voice").addEventListener("click", () => {
-    const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Speech) {
-      text("searchStatus", "음성 인식을 지원하지 않는 브라우저예요. 아래 칸에 직접 입력해 주세요.");
-      say("음성 인식을 지원하지 않습니다. 직접 입력해 주세요.");
-      return;
-    }
+  // 다음에 화면이 다시 그려질 때 이 화면의 위치 추적을 끄기 위한 정리 함수
+  window.__soundroadCleanup = () => {
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  };
 
-    try {
-      if (recognition) {
-        try { recognition.abort(); } catch (e) {}
-      }
-      recognition = new Speech();
-      recognition.lang = "ko-KR";
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      el("voice").disabled = true;
-      text("searchStatus", "목적지를 듣고 있어요. 장소 이름을 말해 주세요.");
-
-      recognition.onresult = event => {
-        const phrase = event.results[0][0].transcript.trim();
-        el("place").value = phrase;
-        text("searchStatus", "인식한 목적지: " + phrase);
-        searchPlace();
-      };
-      recognition.onerror = event => {
-        let message = "음성 인식에 실패했어요. 다시 시도해 주세요.";
-        if (event.error === "not-allowed") {
-          message = "마이크 권한을 허용해 주세요.";
-        } else if (event.error === "no-speech") {
-          message = "음성이 들리지 않았어요. 다시 말해 주세요.";
-        }
-        text("searchStatus", message);
-        say(message);
-      };
-      recognition.onend = () => {
-        el("voice").disabled = false;
-      };
-      recognition.start();
-    } catch (e) {
-      console.error(e);
-      el("voice").disabled = false;
-      text("searchStatus", "음성 인식을 시작하지 못했어요. 직접 입력해 주세요.");
-    }
-  });
-
-  el("search").addEventListener("click", searchPlace);
+  el("search").addEventListener("click", () => searchPlace(false));
   el("place").addEventListener("keydown", event => {
-    if (event.key === "Enter") searchPlace();
+    if (event.key === "Enter") searchPlace(false);
   });
-  el("start").addEventListener("click", startTracking);
+  el("start").addEventListener("click", () => startTracking(false));
   el("stop").addEventListener("click", stopTracking);
 
   window.addEventListener("beforeunload", () => {
     if (watchId !== null) navigator.geolocation.clearWatch(watchId);
   });
+
+  // 위치 추적 중이었다면 이어서 다시 시작 (안내 음성은 생략)
+  if (wasTracking) startTracking(true);
+
+  // 새 음성 입력이 있으면 입력칸에 넣고 바로 검색
+  if (VOICE_QUERY && window.__soundroadLastVoiceId !== VOICE_ID) {
+    window.__soundroadLastVoiceId = VOICE_ID;
+    el("place").value = VOICE_QUERY;
+    text("searchStatus", "인식한 목적지: " + VOICE_QUERY);
+    searchPlace(true);
+  } else if (VOICE_QUERY) {
+    el("place").value = VOICE_QUERY;
+  }
 })();
 </script>
 '''
 
-st.html(APP_HTML, unsafe_allow_javascript=True)
+
+def js_value(value):
+    """파이썬 값을 <script> 안에 안전하게 넣기 위한 변환"""
+    return json.dumps(value, ensure_ascii=False).replace("</", "<\\/")
+
+
+html = (
+    APP_HTML
+    .replace("__VOICE_QUERY__", js_value(st.session_state.voice_query))
+    .replace("__VOICE_ID__", js_value(st.session_state.voice_id))
+)
+
+st.html(html, unsafe_allow_javascript=True)
