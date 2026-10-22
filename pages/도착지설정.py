@@ -1,382 +1,371 @@
-
-import json
-import math
-import requests
 import streamlit as st
-import streamlit.components.v1 as components
-from streamlit_geolocation import streamlit_geolocation
 
 st.set_page_config(
-    page_title="안심도착",
-    page_icon="🧭",
+    page_title="소리길 | 음성 목적지 도우미",
+    page_icon="🔔",
     layout="centered",
+    initial_sidebar_state="collapsed",
 )
 
-st.markdown("""
+APP_HTML = r"""
+<div id="sound-road-app">
 <style>
-html, body, [class*="css"] { font-size: 20px !important; }
-.stApp { background: #f7f9fc; }
-.stButton button {
-    min-height: 3.5rem;
-    font-size: 1.2rem !important;
-    font-weight: bold;
-    border-radius: 12px;
+#sound-road-app {
+  font-family: Arial, "Malgun Gothic", sans-serif;
+  color: #102a43;
+  max-width: 760px;
+  margin: 0 auto;
 }
-input { font-size: 1.2rem !important; }
+#sound-road-app * { box-sizing: border-box; }
+#sound-road-app .hero {
+  background: #102a43;
+  color: white;
+  border-radius: 20px;
+  padding: 24px 20px;
+  margin-bottom: 18px;
+}
+#sound-road-app h1 { font-size: 30px; margin: 0 0 8px; }
+#sound-road-app h2 { font-size: 22px; margin: 0 0 14px; }
+#sound-road-app p { line-height: 1.65; }
+#sound-road-app .card {
+  border: 2px solid #cbd5e1;
+  border-radius: 18px;
+  padding: 20px;
+  margin: 14px 0;
+  background: #fff;
+}
+#sound-road-app .big {
+  display: block;
+  width: 100%;
+  min-height: 66px;
+  border: 0;
+  border-radius: 14px;
+  padding: 16px;
+  margin: 10px 0;
+  font-size: 20px;
+  font-weight: 700;
+  cursor: pointer;
+  color: #102a43;
+  background: #e2e8f0;
+}
+#sound-road-app .primary {
+  color: #fff;
+  background: #075985;
+}
+#sound-road-app .danger {
+  color: #fff;
+  background: #9f1239;
+}
+#sound-road-app button:focus,
+#sound-road-app input:focus {
+  outline: 4px solid #f59e0b;
+  outline-offset: 3px;
+}
+#sound-road-app .status {
+  background: #f1f5f9;
+  border-left: 6px solid #075985;
+  border-radius: 8px;
+  padding: 14px;
+  margin: 12px 0;
+  font-size: 17px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+#sound-road-app .metric {
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+#sound-road-app .muted {
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.65;
+}
+#sound-road-app input {
+  width: 100%;
+  min-height: 54px;
+  border: 2px solid #64748b;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 18px;
+}
+#sound-road-app .result {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 2px solid #64748b;
+  border-radius: 12px;
+  background: #fff;
+  padding: 14px;
+  margin: 8px 0;
+  font-size: 17px;
+  cursor: pointer;
+  color: #102a43;
+}
+#sound-road-app .small-title {
+  font-weight: 800;
+  font-size: 18px;
+  margin-bottom: 8px;
+}
+#sound-road-app .notice {
+  border: 2px solid #b45309;
+  background: #fffbeb;
+  padding: 14px;
+  border-radius: 12px;
+  color: #78350f;
+  line-height: 1.6;
+}
 </style>
-""", unsafe_allow_html=True)
 
-st.title("안심도착")
-st.header("음성으로 목적지 설정하기")
+<section class="hero" aria-labelledby="app-title">
+  <h1 id="app-title">소리길</h1>
+  <p>목적지를 말하고, 거리를 확인하고, 도착 알림을 받아요.</p>
+  <p>화면 읽기 프로그램과 키보드로도 버튼을 사용할 수 있도록 구성했어요.</p>
+</section>
 
-st.info(
-    "이 앱은 도착 알림 보조 도구입니다. "
-    "실제 보행 경로 안내나 장애물 감지는 제공하지 않습니다."
-)
-
-
-def distance_m(lat1, lon1, lat2, lon2):
-    r = 6371000
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = math.radians(lat2 - lat1)
-    dl = math.radians(lon2 - lon1)
-
-    a = (
-        math.sin(dp / 2) ** 2
-        + math.cos(p1) * math.cos(p2)
-        * math.sin(dl / 2) ** 2
-    )
-    return 2 * r * math.atan2(
-        math.sqrt(a), math.sqrt(1 - a)
-    )
-
-
-if "destination_name" not in st.session_state:
-    st.session_state.destination_name = ""
-
-if "destination_coords" not in st.session_state:
-    st.session_state.destination_coords = None
-
-if "confirmed" not in st.session_state:
-    st.session_state.confirmed = False
-
-if "current_location" not in st.session_state:
-    st.session_state.current_location = None
-
-if "arrived" not in st.session_state:
-    st.session_state.arrived = False
-
-
-# 브라우저 음성 인식
-st.write(
-    "목적지 말하기 버튼을 누른 뒤 "
-    "가고 싶은 장소를 말해 주세요. "
-    "예: 서울역, 시청역, 학교 정문."
-)
-
-components.html("""
-<div style="font-family:sans-serif">
-  <button id="help" style="width:100%;padding:18px;font-size:22px">
-    안내 음성 듣기
+<section class="card" aria-labelledby="destination-heading">
+  <h2 id="destination-heading">1. 목적지 설정</h2>
+  <button id="voice-btn" class="big primary">
+    🎙️ 목적지를 음성으로 말하기
   </button>
-  <br><br>
-  <button id="speak" style="width:100%;padding:22px;
-    font-size:24px;font-weight:bold;background:#174ea6;color:white">
-    목적지 말하기
+  <label for="destination-text" class="small-title">
+    음성 인식이 안 되면 목적지를 직접 입력할 수 있어요.
+  </label>
+  <input id="destination-text" type="text"
+         placeholder="예: 천안역, 서울역"
+         autocomplete="street-address">
+  <button id="search-btn" class="big">입력한 목적지 검색</button>
+  <div id="search-status" class="status" role="status" aria-live="polite">
+    먼저 목적지를 말하거나 입력해 주세요.
+  </div>
+  <div id="results" aria-label="목적지 검색 결과"></div>
+</section>
+
+<section class="card" aria-labelledby="location-heading">
+  <h2 id="location-heading">2. 위치 확인 및 이동 시작</h2>
+  <button id="start-btn" class="big primary">
+    📍 현재 위치 확인 및 도착 알림 시작
   </button>
-  <p id="status" aria-live="polite" style="font-size:20px">
-    버튼을 눌러 음성 입력을 시작하세요.
+  <button id="stop-btn" class="big danger">
+    ■ 위치 확인 및 알림 중지
+  </button>
+  <div id="location-status" class="status" role="status" aria-live="polite">
+    시작 버튼을 누르고 브라우저의 위치 권한을 허용해 주세요.
+  </div>
+</section>
+
+<section class="card" aria-labelledby="distance-heading">
+  <h2 id="distance-heading">3. 거리와 도착 상태</h2>
+  <div class="muted">선택한 목적지</div>
+  <div id="chosen-place" class="metric" style="font-size:24px">
+    아직 선택하지 않았어요.
+  </div>
+  <hr>
+  <div class="muted">도보 경로 거리(마지막으로 계산한 값)</div>
+  <div id="route-distance" class="metric" aria-live="polite">계산 전</div>
+  <p id="route-time">예상 도보 시간: 계산 전</p>
+  <div class="muted">현재 위치에서 목적지까지의 직선거리</div>
+  <div id="direct-distance" class="metric" style="font-size:24px">측정 전</div>
+  <div id="arrival-status" class="status" role="status" aria-live="polite">
+    목적지를 선택하고 위치 확인을 시작하면 상태가 표시돼요.
+  </div>
+</section>
+
+<section class="card">
+  <h2>안전 및 개인정보 안내</h2>
+  <div class="notice">
+    이 서비스는 정밀 내비게이션이 아닙니다. GPS와 지도 정보에는 오차가 있을 수
+    있으므로, 음성 안내만 믿고 도로를 건너거나 이동하지 마세요.
+    필요하면 보호자 또는 주변 사람의 도움을 요청하세요.
+  </div>
+  <p class="muted">
+    현재 위치와 목적지 검색어는 거리·장소를 조회하기 위해 외부 지도 서비스에
+    전달될 수 있습니다. 브라우저의 위치 권한을 허용할지 신중하게 결정하세요.
   </p>
-  <script>
-    function say(text) {
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = "ko-KR";
-      speechSynthesis.cancel();
-      speechSynthesis.speak(u);
+  <p class="muted">
+    장소 데이터: OpenStreetMap / Photon · 경로 데이터: OpenStreetMap 기반 FOSSGIS
+    경로 서비스
+  </p>
+</section>
+</div>
+
+<script>
+(function () {
+  const root = document.getElementById("sound-road-app");
+  if (!root || root.dataset.initialized === "yes") return;
+  root.dataset.initialized = "yes";
+
+  const $ = (id) => document.getElementById(id);
+  const voiceBtn = $("voice-btn");
+  const searchBtn = $("search-btn");
+  const startBtn = $("start-btn");
+  const stopBtn = $("stop-btn");
+  const destinationInput = $("destination-text");
+
+  let currentPosition = null;
+  let destination = null;
+  let watchId = null;
+  let arrivalAnnounced = false;
+  let recognition = null;
+  let routeInFlight = false;
+  let lastRouteAt = 0;
+  let audioContext = null;
+  let lastAccuracy = null;
+
+  function setText(id, text) {
+    $(id).textContent = text;
+  }
+
+  function speak(message) {
+    try {
+      if (!("speechSynthesis" in window)) return;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(message);
+      utterance.lang = "ko-KR";
+      utterance.rate = 0.9;
+      window.speechSynthesis.speak(utterance);
+    } catch (error) {
+      console.warn("음성 안내 오류:", error);
+    }
+  }
+
+  function playAlert() {
+    try {
+      const AudioContextClass =
+        window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) {
+        speak("목적지 근처에 도착했습니다. 주변을 확인해 주세요.");
+        return;
+      }
+      audioContext = audioContext || new AudioContextClass();
+      if (audioContext.state === "suspended") {
+        audioContext.resume();
+      }
+
+      const playTone = (when, frequency) => {
+        const oscillator = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        oscillator.type = "sine";
+        oscillator.frequency.value = frequency;
+        gain.gain.setValueAtTime(0.001, when);
+        gain.gain.exponentialRampToValueAtTime(0.3, when + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, when + 0.35);
+        oscillator.connect(gain);
+        gain.connect(audioContext.destination);
+        oscillator.start(when);
+        oscillator.stop(when + 0.38);
+      };
+
+      const now = audioContext.currentTime;
+      playTone(now, 880);
+      playTone(now + 0.42, 660);
+      playTone(now + 0.84, 880);
+      setTimeout(() => {
+        speak("목적지 근처에 도착했습니다. 주변을 확인해 주세요.");
+      }, 1300);
+    } catch (error) {
+      console.warn("알림음 재생 오류:", error);
+      speak("목적지 근처에 도착했습니다. 주변을 확인해 주세요.");
+    }
+  }
+
+  function formatDistance(meters) {
+    if (!Number.isFinite(meters)) return "계산할 수 없어요.";
+    if (meters < 1000) return Math.round(meters) + "미터";
+    return (meters / 1000).toFixed(2) + "킬로미터";
+  }
+
+  function formatDuration(seconds) {
+    if (!Number.isFinite(seconds)) return "계산할 수 없어요.";
+    const minutes = Math.max(1, Math.round(seconds / 60));
+    if (minutes < 60) return "약 " + minutes + "분";
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    return remainder ? "약 " + hours + "시간 " + remainder + "분"
+                     : "약 " + hours + "시간";
+  }
+
+  function straightDistance(lat1, lon1, lat2, lon2) {
+    const toRad = (degrees) => degrees * Math.PI / 180;
+    const earthRadius = 6371000;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) ** 2;
+    return earthRadius * 2 *
+      Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  function updateDirectDistance() {
+    if (!currentPosition || !destination) return;
+    const meters = straightDistance(
+      currentPosition.lat, currentPosition.lon,
+      destination.lat, destination.lon
+    );
+    setText("direct-distance", formatDistance(meters));
+    return meters;
+  }
+
+  async function searchDestination() {
+    const query = destinationInput.value.trim();
+    if (!query) {
+      setText("search-status", "목적지를 먼저 말하거나 입력해 주세요.");
+      speak("목적지를 먼저 입력해 주세요.");
+      return;
     }
 
-    document.getElementById("help").onclick = () => {
-      say("목적지 말하기 버튼을 누르고 가고 싶은 장소의 이름을 말해 주세요.");
-    };
+    setText("search-status", "장소를 검색하고 있어요. 잠시 기다려 주세요.");
+    $("results").replaceChildren();
+    searchBtn.disabled = true;
+    voiceBtn.disabled = true;
 
-    document.getElementById("speak").onclick = () => {
-      const SR = window.SpeechRecognition ||
-                 window.webkitSpeechRecognition;
+    try {
+      const params = new URLSearchParams({
+        q: query + ", 대한민국",
+        limit: "5",
+        lang: "ko"
+      });
 
-      if (!SR) {
-        document.getElementById("status").textContent =
-          "음성 인식을 지원하지 않습니다. 아래 입력 칸을 사용하세요.";
-        say("음성 인식을 지원하지 않습니다. 아래 입력 칸을 사용하세요.");
+      if (currentPosition) {
+        params.set("lat", String(currentPosition.lat));
+        params.set("lon", String(currentPosition.lon));
+      }
+
+      const response = await fetch(
+        "https://photon.komoot.io/api/?" + params.toString(),
+        { method: "GET" }
+      );
+      if (!response.ok) {
+        throw new Error("장소 검색 서버가 응답하지 않습니다.");
+      }
+
+      const data = await response.json();
+      const features = Array.isArray(data.features) ? data.features : [];
+
+      if (features.length === 0) {
+        setText(
+          "search-status",
+          "장소를 찾지 못했어요. 동네 이름이나 도로명 주소를 포함해 다시 검색해 주세요."
+        );
+        speak("장소를 찾지 못했습니다. 조금 더 자세히 말해 주세요.");
         return;
       }
 
-      const rec = new SR();
-      rec.lang = "ko-KR";
-      rec.interimResults = false;
-      rec.maxAlternatives = 1;
+      setText("search-status", "검색 결과가 " + features.length +
+        "개 있어요. 원하는 장소를 선택해 주세요.");
 
-      document.getElementById("status").textContent =
-        "듣고 있습니다. 목적지를 말해 주세요.";
-      say("목적지를 말해 주세요.");
+      features.forEach((feature) => {
+        const coords = feature && feature.geometry &&
+          feature.geometry.coordinates;
+        if (!coords || coords.length < 2) return;
 
-      rec.onresult = (event) => {
-        const result = event.results[0][0].transcript.trim();
-        document.getElementById("status").textContent =
-          "인식한 내용: " + result;
+        const props = feature.properties || {};
+        const name = props.name || props.street || "이름 없는 장소";
+        const details = [
+          props.district, props.city, props.state, props.country
+        ].filter(Boolean);
+        const label = [name, ...details].join(", ");
 
-        const url = new URL(window.parent.location.href);
-        url.searchParams.set("voice_destination", result);
-        window.parent.location.href = url.toString();
-      };
-
-      rec.onerror = (event) => {
-        let msg = "음성을 인식하지 못했습니다. 다시 시도해 주세요.";
-        if (event.error === "not-allowed") {
-          msg = "마이크 권한을 허용해 주세요.";
-        }
-        document.getElementById("status").textContent = msg;
-        say(msg);
-      };
-
-      rec.start();
-    };
-  </script>
-</div>
-""", height=220)
-
-
-# 음성 인식 결과 받기
-try:
-    voice_text = st.query_params.get("voice_destination", "")
-except Exception:
-    voice_text = ""
-
-if voice_text:
-    st.session_state.destination_name = voice_text.strip()
-    st.session_state.confirmed = False
-    st.session_state.destination_coords = None
-    st.session_state.arrived = False
-
-    try:
-        del st.query_params["voice_destination"]
-    except Exception:
-        pass
-
-
-st.subheader("목적지 확인")
-
-typed_name = st.text_input(
-    "목적지 이름",
-    value=st.session_state.destination_name,
-    placeholder="예: 서울역",
-)
-
-if typed_name != st.session_state.destination_name:
-    st.session_state.destination_name = typed_name.strip()
-    st.session_state.confirmed = False
-    st.session_state.destination_coords = None
-
-if st.button("목적지 이름 읽기", use_container_width=True):
-    if st.session_state.destination_name.strip():
-        name_json = json.dumps(
-            st.session_state.destination_name,
-            ensure_ascii=False,
-        )
-        components.html(f"""
-        <script>
-        const u = new SpeechSynthesisUtterance(
-            {name_json} + " 입니다. 맞는 목적지인지 확인해 주세요."
-        );
-        u.lang = "ko-KR";
-        speechSynthesis.cancel();
-        speechSynthesis.speak(u);
-        </script>
-        """, height=10)
-    else:
-        st.warning("먼저 목적지를 말하거나 입력해 주세요.")
-
-
-if st.button("이 목적지로 설정", type="primary",
-             use_container_width=True):
-    name = st.session_state.destination_name.strip()
-
-    if not name:
-        st.warning("목적지를 먼저 입력해 주세요.")
-    else:
-        with st.spinner("목적지를 검색하고 있어요."):
-            try:
-                response = requests.get(
-                    "https://nominatim.openstreetmap.org/search",
-                    params={
-                        "q": name + ", South Korea",
-                        "format": "jsonv2",
-                        "limit": 1,
-                    },
-                    headers={
-                        "User-Agent": "AnsimDochagAccessibilityApp/1.0"
-                    },
-                    timeout=15,
-                )
-                response.raise_for_status()
-                results = response.json()
-
-                if results:
-                    result = results[0]
-                    st.session_state.destination_coords = {
-                        "lat": float(result["lat"]),
-                        "lon": float(result["lon"]),
-                        "address": result.get("display_name", ""),
-                    }
-                    st.session_state.confirmed = True
-                    st.session_state.arrived = False
-                    st.success("목적지를 찾았어요.")
-                    st.write("검색 결과:", result.get("display_name", name))
-                else:
-                    st.session_state.confirmed = False
-                    st.error(
-                        "장소를 찾지 못했어요. "
-                        "동네 이름을 포함해 다시 말해 주세요."
-                    )
-
-            except requests.RequestException:
-                st.session_state.confirmed = False
-                st.error(
-                    "장소 검색에 실패했어요. "
-                    "인터넷 연결을 확인한 뒤 다시 시도해 주세요."
-                )
-
-
-# 현재 위치 확인
-st.header("현재 위치 확인")
-
-if st.button("현재 위치 확인 또는 새로고침",
-             type="primary", use_container_width=True):
-    st.session_state.request_location = True
-
-if st.session_state.get("request_location", False):
-    location = streamlit_geolocation()
-
-    if (
-        location
-        and location.get("latitude") is not None
-        and location.get("longitude") is not None
-    ):
-        st.session_state.current_location = {
-            "lat": float(location["latitude"]),
-            "lon": float(location["longitude"]),
-        }
-        st.session_state.request_location = False
-        st.rerun()
-    else:
-        st.info(
-            "브라우저의 위치 권한을 허용해 주세요. "
-            "위치를 받지 못하면 다시 버튼을 눌러 주세요."
-        )
-
-
-# 거리와 도착 알림
-st.header("도착 알림")
-
-radius = st.select_slider(
-    "도착으로 판단할 거리",
-    options=[20, 30, 50, 75, 100, 150, 200],
-    value=50,
-    format_func=lambda x: f"{x}미터",
-)
-
-if (
-    st.session_state.confirmed
-    and st.session_state.destination_coords
-    and st.session_state.current_location
-):
-    d = st.session_state.destination_coords
-    p = st.session_state.current_location
-
-    distance = distance_m(
-        p["lat"], p["lon"], d["lat"], d["lon"]
-    )
-
-    st.metric("목적지까지 직선거리", f"{distance:.0f}m")
-
-    if distance <= radius:
-        st.success("도착 반경 안에 들어왔어요!")
-
-        if not st.session_state.arrived:
-            st.session_state.arrived = True
-
-            name_json = json.dumps(
-                st.session_state.destination_name,
-                ensure_ascii=False,
-            )
-
-            components.html(f"""
-            <button id="repeat" style="padding:16px;font-size:22px">
-              도착 알림 다시 듣기
-            </button>
-            <p aria-live="polite" id="alertStatus"></p>
-            <script>
-              function notify() {{
-                try {{
-                  if (navigator.vibrate) {{
-                    navigator.vibrate([300,150,300,150,600]);
-                  }}
-                }} catch(e) {{}}
-
-                try {{
-                  const u = new SpeechSynthesisUtterance(
-                    {name_json} +
-                    " 근처에 도착한 것으로 보여요. 주변을 확인해 주세요."
-                  );
-                  u.lang = "ko-KR";
-                  speechSynthesis.cancel();
-                  speechSynthesis.speak(u);
-                }} catch(e) {{}}
-
-                try {{
-                  const AC = window.AudioContext ||
-                             window.webkitAudioContext;
-                  if (AC) {{
-                    const ctx = new AC();
-                    [880,660,880].forEach((freq,i) => {{
-                      const osc = ctx.createOscillator();
-                      const gain = ctx.createGain();
-                      osc.frequency.value = freq;
-                      gain.gain.value = 0.12;
-                      osc.connect(gain);
-                      gain.connect(ctx.destination);
-                      osc.start(ctx.currentTime + i * 0.3);
-                      osc.stop(ctx.currentTime + i * 0.3 + 0.18);
-                    }});
-                  }}
-                }} catch(e) {{}}
-
-                document.getElementById("alertStatus").textContent =
-                  "도착 알림을 실행했어요.";
-              }}
-
-              document.getElementById("repeat").onclick = notify;
-              notify();
-            </script>
-            """, height=130)
-
-    else:
-        st.info(
-            f"아직 도착 반경 밖이에요. "
-            f"약 {max(0, distance - radius):.0f}m 더 가까워지면 "
-            "알림 조건에 들어옵니다."
-        )
-
-    st.caption(
-        "현재 위치는 마지막으로 확인한 위치입니다. "
-        "이동 중에는 위치 새로고침 버튼을 눌러 주세요."
-    )
-
-elif st.session_state.confirmed:
-    st.info("현재 위치를 확인하면 거리를 계산할 수 있어요.")
-
-st.divider()
-st.caption(
-    "GPS 오차가 있을 수 있으며, 진동과 음성 기능은 "
-    "기기와 브라우저에 따라 다르게 작동할 수 있습니다. "
-    "이 앱은 자동 백그라운드 추적이나 실제 길 안내를 제공하지 않습니다."
-)
+        const button = document
